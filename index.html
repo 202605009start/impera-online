@@ -78,6 +78,10 @@ svg.nolines .edge.land:not(.hl){display:none}
 .pilerow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .deck{position:relative;width:62px;height:84px;display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:2px;line-height:1;border-radius:9px;flex:none;cursor:default;background:repeating-linear-gradient(45deg,#7a2d22 0 6px,#8f3a2c 6px 12px);border:3px solid var(--parch2);box-shadow:3px 3px 0 #5a2018,6px 6px 0 #3e160f;display:grid;place-items:center;color:#fff;font-family:"Noto Serif TC",serif;font-weight:900;font-size:22px;text-shadow:0 2px 3px #000;transition:transform .12s}
 .deck small{font-family:"Noto Sans TC";font-size:10px;font-weight:700;white-space:nowrap;letter-spacing:-.5px}
+.deck.shuffling{animation:shuf .45s ease-in-out 4}
+@keyframes shuf{0%{transform:none}25%{transform:translateX(-9px) rotate(-10deg)}50%{transform:translateY(-4px) rotate(4deg)}75%{transform:translateX(9px) rotate(10deg)}100%{transform:none}}
+.actions button.rps{font-size:20px;padding:12px 6px;flex:1 1 0}
+#timer.low{background:var(--red);color:#fff;animation:glow 1s ease-in-out infinite alternate}
 .deck.can{cursor:pointer;animation:glow 1s ease-in-out infinite alternate}
 .deck.can:active{transform:scale(.94)}
 @keyframes glow{from{box-shadow:3px 3px 0 #5a2018,6px 6px 0 #3e160f,0 0 0 #ffd76a}to{box-shadow:3px 3px 0 #5a2018,6px 6px 0 #3e160f,0 0 18px 4px #ffd76a}}
@@ -161,6 +165,7 @@ details summary{cursor:pointer;color:var(--gold);font-weight:700}
       <div class="panel">
         <h2>開始遊戲</h2>
         <div class="row"><label>暱稱</label><input id="nick" maxlength="12" placeholder="輸入你的名字" style="flex:1"></div>
+        <div class="row"><label>每回合時間</label><select id="timeSel"><option value="0">不限時</option><option value="30">30 秒</option><option value="60">60 秒</option><option value="90">90 秒</option></select><span class="note">（建立房間和單機都適用）</span></div>
         <div id="onlineBox">
           <div class="row"><button id="btnCreate">建立線上房間</button></div>
           <div class="row"><input id="joinCode" maxlength="4" placeholder="房號" autocapitalize="characters" style="width:110px;text-transform:uppercase"><button id="btnJoin" class="ghost">加入房間</button></div>
@@ -191,12 +196,16 @@ details summary{cursor:pointer;color:var(--gold);font-weight:700}
       <div class="row"><button class="ghost" id="btnCopy">複製邀請連結</button></div>
       <div id="roomPlayers" class="list" style="margin-top:10px"></div>
       <div id="hostCtrls" class="row hidden" style="margin-top:12px">
+        <span>每回合時間：</span><select id="roomTime"><option value="0">不限時</option><option value="30">30 秒</option><option value="60">60 秒</option><option value="90">90 秒</option></select>
+      </div>
+      <div id="hostCtrls2" class="row hidden">
         <span>電腦玩家：</span>
         <button class="ghost" id="botMinus">－</button><span id="botCount" class="pill">0</span><button class="ghost" id="botPlus">＋</button>
         <span class="spacer"></span>
         <button id="btnStart">開始遊戲</button>
       </div>
       <div id="guestWait" class="note hidden" style="margin-top:12px">等待房主開始遊戲…</div>
+      <div id="timeInfo" class="note" style="margin-top:6px"></div>
       <div class="err" id="roomErr"></div>
     </div>
   </section>
@@ -213,6 +222,7 @@ details summary{cursor:pointer;color:var(--gold);font-weight:700}
           <div class="pilerow">
             <div class="deck" id="deck"><span id="deckN">0</span><small id="deckHint">牌庫</small></div>
             <div class="pileinfo" id="pileinfo"></div>
+            <span id="timer" class="pill hidden" style="font-size:15px;font-weight:700"></span>
             <span class="spacer"></span>
             <button class="ghost mobonly" id="btnSide">📜 戰況</button>
             <button class="ghost mobonly" id="btnLeave2">離開</button>
@@ -273,20 +283,26 @@ const SEAT_COLORS=['#e63946','#1d5fd8','#14a34a','#f5c518','#2b2b2b'];
 const DARK_TEXT=new Set(['#f5c518']);
 const BOT_NAMES=['拿破崙','凱撒','成吉思汗','亞歷山大','伊莉莎白'];
 
-function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+// 洗牌：Fisher–Yates，優先使用瀏覽器的密碼學亂數
+function rndInt(n){ try{ const c=globalThis.crypto; if(c&&c.getRandomValues){ const lim=Math.floor(4294967296/n)*n, b=new Uint32Array(1); do{c.getRandomValues(b);}while(b[0]>=lim); return b[0]%n; } }catch(e){} return Math.floor(Math.random()*n); }
+function shuffle(a){a=a.slice();for(let k=0;k<3;k++)for(let i=a.length-1;i>0;i--){const j=rndInt(i+1);[a[i],a[j]]=[a[j],a[i]];}return a;}
 function clone(o){return JSON.parse(JSON.stringify(o));}
 function nm(id){return R[id].name;}
 function addLog(s,msg){s.log.push(msg); if(s.log.length>60) s.log=s.log.slice(-60);}
 function seatName(s,i){return s.seats[i].name;}
 
-function newGame(seats){
+// 回合時間限制：deadline 為毫秒時間戳；timeLimit 為秒（0 = 不限）
+function stamp(s){ s.deadline=s.timeLimit?Date.now()+s.timeLimit*1000:0; }
+function newGame(seats,opts){
   let deck=shuffle(REGIONS.flatMap(r=>[r.id,r.id,r.id]));
   const hands={};
   seats.forEach((_,i)=>{hands[i]=deck.splice(0,5);});
   const s={status:'playing',seats,deck,discard:[],reshuffles:0,maxReshuffles:seats.length<=3?1:0,
-    hands,owned:{},turn:Math.floor(Math.random()*seats.length),phase:'draw',pending:0,refill:null,battle:null,lastBattle:null,
-    log:[],ending:false,result:null,newCard:null,startedAt:Date.now()};
-  addLog(s,`遊戲開始！由 ${seatName(s,s.turn)} 先手。`);
+    hands,owned:{},turn:0,phase:'rps',pending:0,refill:null,battle:null,lastBattle:null,
+    rps:{round:1,alive:seats.map((_,i)=>i),picks:{},last:null},
+    log:[],ending:false,result:null,newCard:null,startedAt:Date.now(),shuffledAt:Date.now()};
+  s.timeLimit=(opts&&opts.timeLimit)||0; stamp(s);
+  addLog(s,'洗牌完成，每人發 5 張。用剪刀石頭布決定誰先出！'+(s.timeLimit?`（每回合限時 ${s.timeLimit} 秒）`:''));
   return s;
 }
 function drawN(s,seat,n){
@@ -296,7 +312,7 @@ function drawN(s,seat,n){
     const c=s.deck.pop(); s.hands[seat].push(c); got.push(c);
     if(s.deck.length===0){
       if(s.reshuffles<s.maxReshuffles && s.discard.length){
-        s.deck=shuffle(s.discard); s.discard=[]; s.reshuffles++;
+        s.deck=shuffle(s.discard); s.discard=[]; s.reshuffles++; s.shuffledAt=Date.now();
         addLog(s,'牌庫抽完，棄牌堆洗回成為新牌庫（最後一輪！）');
       } else { s.ending=true; }
     }
@@ -308,8 +324,8 @@ function endTurn(s){
   if(s.ending){finish(s);return;}
   s.pending=0; s.refill=null;
   const over=s.hands[s.turn].length-HAND_LIMIT;
-  if(over>0){ s.phase='discard'; s.pending=over; return; }   // 回合結束：手牌上限 10 張
-  s.turn=(s.turn+1)%s.seats.length; s.phase='draw';
+  if(over>0){ s.phase='discard'; s.pending=over; stamp(s); return; }   // 回合結束：手牌上限 10 張
+  s.turn=(s.turn+1)%s.seats.length; s.phase='draw'; stamp(s);
 }
 function actDiscard(s,seat,idxs){
   if(s.status!=='playing'||s.phase!=='discard'||s.turn!==seat) throw new Error('現在不需要棄牌');
@@ -318,7 +334,7 @@ function actDiscard(s,seat,idxs){
   const cards=takeCards(s.hands[seat],idxs);
   s.discard.push(...cards);
   addLog(s,`${seatName(s,seat)} 手牌超過 ${HAND_LIMIT} 張，棄掉 ${cards.length} 張。`);
-  s.pending=0; s.turn=(s.turn+1)%s.seats.length; s.phase='draw';
+  s.pending=0; s.turn=(s.turn+1)%s.seats.length; s.phase='draw'; stamp(s);
 }
 function components(s,seat){
   const mine=Object.keys(s.owned).filter(k=>s.owned[k]===seat), seen=new Set(), comps=[];
@@ -371,6 +387,30 @@ function actTap(s,seat){
   }
   if(s.ending) finish(s);
 }
+const RPS={r:'✊ 石頭',s:'✌️ 剪刀',p:'✋ 布'}, RPS_BEATS={r:'s',s:'p',p:'r'};
+function actRps(s,seat,shape){
+  const g=s.rps;
+  if(s.status!=='playing'||s.phase!=='rps'||!g.alive.includes(seat)) throw new Error('你這輪不用出拳');
+  if(g.picks[seat]) throw new Error('你已經出拳了');
+  if(!RPS[shape]) throw new Error('請選剪刀、石頭或布');
+  g.picks[seat]=shape;
+  if(!g.alive.every(i=>g.picks[i])) return;
+  const shapes=new Set(g.alive.map(i=>g.picks[i]));
+  const show=g.alive.map(i=>`${seatName(s,i)}${RPS[g.picks[i]].split(' ')[0]}`).join('、');
+  if(shapes.size!==2){
+    g.last={round:g.round,picks:{...g.picks},text:`第 ${g.round} 輪：${show} → 平手，再來一次！`};
+    addLog(s,g.last.text); g.round++; g.picks={}; stamp(s); return;
+  }
+  const [a,b]=[...shapes], win=RPS_BEATS[a]===b?a:b;
+  const winners=g.alive.filter(i=>g.picks[i]===win);
+  if(winners.length===1){
+    g.last={round:g.round,picks:{...g.picks},text:`第 ${g.round} 輪：${show} → ${seatName(s,winners[0])} 獲勝，先出！`};
+    addLog(s,g.last.text);
+    s.turn=winners[0]; s.phase='draw'; g.done=true; stamp(s); return;
+  }
+  g.last={round:g.round,picks:{...g.picks},text:`第 ${g.round} 輪：${show} → ${winners.map(i=>seatName(s,i)).join('、')} 晉級，繼續猜拳！`};
+  addLog(s,g.last.text); g.alive=winners; g.round++; g.picks={}; stamp(s);
+}
 function actDraw2(s,seat){
   if(s.status!=='playing'||s.phase!=='action'||s.turn!==seat) throw new Error('現在不是你的回合');
   s.phase='draw2'; s.pending=2;
@@ -390,7 +430,7 @@ function actAttack(s,seat,from,to,idxs){
   if(!ADJ[from].has(to)) throw new Error('兩個地區不相鄰');
   const cards=takeCards(s.hands[seat],idxs);
   s.battle={attacker:seat,defender:s.owned[to],from,to,atkCards:cards};
-  s.phase='defend';
+  s.phase='defend'; stamp(s);
   addLog(s,`⚔️ ${seatName(s,seat)} 從 ${nm(from)} 進攻 ${seatName(s,s.owned[to])} 的 ${nm(to)}，投入 ${cards.length} 張暗牌！`);
 }
 function actDefend(s,seat,idxs){
@@ -406,7 +446,7 @@ function actDefend(s,seat,idxs){
   s.battle=null; s.turn=b.attacker;
   s.refill=[{seat:b.attacker,n:an},{seat:b.defender,n:dn}];
   if(an+dn===0){ endTurn(s); return; }
-  s.phase='refill';
+  s.phase='refill'; stamp(s);
   addLog(s,`補牌時間：${seatName(s,b.attacker)} 可抽 ${an} 張、${seatName(s,b.defender)} 可抽 ${dn} 張，搶牌開始！`);
 }
 function waitingOn(s){
@@ -414,7 +454,29 @@ function waitingOn(s){
   if(s.phase==='defend') return [s.battle.defender];
   if(s.phase==='refill') return s.refill.filter(r=>r.n>0).map(r=>r.seat);
   if(s.phase==='discard') return [s.turn];
+  if(s.phase==='rps') return s.rps.alive.filter(i=>!s.rps.picks[i]);
   return [s.turn];
+}
+
+/* ---- 時間到：替還沒動作的真人玩家自動完成 ---- */
+function timedOut(s,now){ return s.status==='playing'&&s.deadline>0&&(now||Date.now())>s.deadline; }
+function autoTimeout(s){
+  if(!timedOut(s)) return false;
+  const humans=waitingOn(s).filter(i=>!s.seats[i].bot); if(!humans.length) return false;
+  const nameList=humans.map(i=>seatName(s,i)).join('、');
+  let guard=0;
+  const still=()=>s.status==='playing'&&guard++<40;
+  if(s.phase==='rps'){ humans.forEach(i=>{ if(s.phase==='rps'&&!s.rps.picks[i]) actRps(s,i,'rsp'[rndInt(3)]); }); addLog(s,`⏰ ${nameList} 時間到，隨機出拳。`); return true; }
+  if(s.phase==='defend'){ addLog(s,`⏰ ${nameList} 時間到，不投入援軍。`); actDefend(s,s.battle.defender,[]); return true; }
+  if(s.phase==='discard'){ const t=s.turn; addLog(s,`⏰ ${nameList} 時間到，自動棄牌。`); actDiscard(s,t,botDiscard(s,t)); return true; }
+  if(s.phase==='refill'){ addLog(s,`⏰ ${nameList} 時間到，自動補牌。`);
+    while(still()&&s.phase==='refill'){ const r=s.refill.find(r=>r.n>0&&!s.seats[r.seat].bot)||s.refill.find(r=>r.n>0); if(!r) break; actTap(s,r.seat); } return true; }
+  const t=s.turn;
+  addLog(s,`⏰ ${nameList} 時間到，自動抽 2 張牌。`);
+  if(s.phase==='draw'&&still()) actTap(s,t);
+  if(s.status==='playing'&&s.phase==='action'&&s.turn===t) actDraw2(s,t);
+  while(still()&&s.phase==='draw2'&&s.turn===t) actTap(s,t);
+  return true;
 }
 
 /* ---- AI ---- */
@@ -473,6 +535,7 @@ function botDiscard(s,seat){
 }
 function runBot(s,seat){
   if(s.phase==='discard') { actDiscard(s,seat,botDiscard(s,seat)); return; }
+  if(s.phase==='rps') { actRps(s,seat,'rsp'[rndInt(3)]); return; }
   if(s.phase==='defend') actDefend(s,seat,botDefense(s,seat));
   else if(s.phase==='draw'||s.phase==='draw2'||s.phase==='refill') actTap(s,seat);
   else { const a=botAction(s,seat);
@@ -485,9 +548,11 @@ function runBot(s,seat){
 
 const RULES=`<p><b>目標：</b>遊戲結束時，擁有最大「連成一片」領土的人獲勝。</p>
 <p><b>配件：</b>30 個地區 × 各 3 張＝90 張牌，數字 1–6 是地區戰力。開局每人 5 張。</p>
+<p><b>先手：</b>開局大家一起猜拳（剪刀石頭布），贏的人先出；平手就再猜，多人同時贏的話由贏家繼續猜。</p>
 <p><b>你的回合：</b>先<b>點牌堆抽 1 張</b>，再選一個行動：</p>
 <p>① <b>抽 2 張牌</b>（點牌堆兩次）<br>② <b>打出地區</b>：把一張「還沒有人佔領」的地區放上地圖。<br>③ <b>進攻</b>：從你的地區攻擊<b>相鄰</b>的對手地區。你先暗中投入任意張手牌當援軍，防守方看到張數後也暗中投入。地區戰力＋援軍總和，<b>進攻方較大</b>才奪下（平手防守方贏）。</p>
 <p><b>補牌搶牌：</b>投入的牌全進棄牌堆。之後進攻方可抽回最多 2 張、防守方最多 3 張（不超過自己投入的張數），雙方<b>同時點牌堆搶牌</b>，先點先得！</p>
+<p><b>時間限制：</b>房主可設定每回合 30／60／90 秒。時間到時：還沒抽牌就自動抽、還沒行動就自動「抽 2 張」、防守自動不出援軍、補牌自動抽完、猜拳隨機出。</p>
 <p><b>手牌上限：</b>回合結束時手牌最多 10 張，超過要自己選牌棄掉。</p>
 <p><b>結束：</b>2–3 人局牌庫第一次抽完把棄牌洗回，第二次抽完結束；4–5 人局牌庫抽完立即結束。</p>
 <p><b>計分：</b>你最大的一片相連領土，每個地區 1 分；手上每張與這片領土相同地區的牌再 +1 分。</p>
@@ -506,9 +571,12 @@ const ONLINE=!!sb;
 let mode='lobby', offline=false, code=null, G=null, players=[];
 let channel=null, pollTimer=null, roomsTimer=null;
 let ui={from:null,to:null,sel:new Set()};
+let lastShuf=null, rpsShown=null;
 let busy=false, seenBattle=null, botTimer=null, botKey=null, endShownVer=null, lastFx=null;
 
 $('nick').value=store.get('impera_nick')||'';
+$('timeSel').value=store.get('impera_time')||'0';
+$('timeSel').addEventListener('change',()=>store.set('impera_time',$('timeSel').value));
 $('nick').addEventListener('change',()=>store.set('impera_nick',$('nick').value.trim()));
 function myName(){return ($('nick').value.trim()||'玩家').slice(0,12);}
 function toast(msg,ms){const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),ms||2600);}
@@ -554,7 +622,7 @@ async function createRoom(){
   const A='ABCDEFGHJKLMNPQRSTUVWXYZ';
   for(let k=0;k<6;k++){
     const c=Array.from({length:4},()=>A[Math.floor(Math.random()*A.length)]).join('');
-    const st={status:'lobby',code:c,host:PID,hostName:myName(),bots:0,createdAt:Date.now()};
+    const st={status:'lobby',code:c,host:PID,hostName:myName(),bots:0,timeLimit:+$('timeSel').value||0,createdAt:Date.now()};
     const {data,error}=await sb.rpc('impera_create',{p_code:c,p_state:st});
     if(error){ $('lobbyErr').textContent='連線錯誤：'+error.message; return; }
     if(data===true){ return enterRoom(c); }
@@ -623,7 +691,7 @@ $('btnSolo').onclick=()=>{
   const n=+$('soloBots').value, names=shuffle(BOT_NAMES);
   const seats=[{id:'local',name:myName(),bot:false,color:SEAT_COLORS[0]}];
   for(let i=0;i<n;i++) seats.push({id:'bot'+i,name:names[i],bot:true,color:SEAT_COLORS[i+1]});
-  G=newGame(seats); G.ver=1; onState();
+  G=newGame(seats,{timeLimit:+$('timeSel').value||0}); G.ver=1; onState();
 };
 
 /* ---- room ---- */
@@ -636,13 +704,16 @@ function renderRoom(){
     const n=document.createElement('span');n.textContent=p.name+(p.pid===G.host?'（房主）':'')+(p.pid===PID?'・你':'');it.appendChild(n);box.appendChild(it);});
   for(let i=0;i<bots;i++){const it=document.createElement('div');it.className='item';it.innerHTML=`<span class="dot" style="background:${SEAT_COLORS[Math.min(players.length,5)+i]||'#888'}"></span><span>🤖 電腦玩家 ${i+1}</span>`;box.appendChild(it);}
   if(players.length>5){const it=document.createElement('div');it.className='note';it.textContent=`另有 ${players.length-5} 人將以觀戰者身分加入。`;box.appendChild(it);}
-  $('hostCtrls').classList.toggle('hidden',!isHost); $('guestWait').classList.toggle('hidden',isHost);
+  $('hostCtrls').classList.toggle('hidden',!isHost); $('hostCtrls2').classList.toggle('hidden',!isHost); $('guestWait').classList.toggle('hidden',isHost);
+  $('roomTime').value=String(G.timeLimit||0); $('roomTime').disabled=busy;
+  $('timeInfo').textContent='每回合時間：'+(G.timeLimit?G.timeLimit+' 秒（時間到會自動行動）':'不限時');
   $('botCount').textContent=bots;
   const total=Math.min(players.length,5)+bots;
   $('btnStart').disabled=busy||total<2||total>5; $('botPlus').disabled=busy||total>=5; $('botMinus').disabled=busy||bots<=0;
 }
 $('btnCopy').onclick=async()=>{ const url=location.origin+location.pathname+'#'+code; try{ await navigator.clipboard.writeText(url); toast('已複製：'+url); }catch(e){ toast(url,6000); } };
 async function lobbyUpdate(patch){ if(busy) return; busy=true; const s={...G,...patch}; const ok=await commit(s); busy=false; if(!ok){ await refetch(); } renderRoom(); }
+$('roomTime').onchange=()=>lobbyUpdate({timeLimit:+$('roomTime').value||0});
 $('botPlus').onclick=()=>lobbyUpdate({bots:(G.bots||0)+1});
 $('botMinus').onclick=()=>lobbyUpdate({bots:Math.max(0,(G.bots||0)-1)});
 $('btnStart').onclick=async()=>{
@@ -651,7 +722,7 @@ $('btnStart').onclick=async()=>{
   const seats=humans.map((p,i)=>({id:p.pid,name:p.name,bot:false,color:SEAT_COLORS[i]}));
   for(let i=0;i<(G.bots||0)&&seats.length<5;i++) seats.push({id:'bot'+i,name:names[i],bot:true,color:SEAT_COLORS[seats.length]});
   if(seats.length<2){ toast('至少要 2 個座位'); return; }
-  const s=newGame(seats); s.code=code; s.host=G.host; s.hostName=G.hostName; s.createdAt=G.createdAt;
+  const s=newGame(seats,{timeLimit:G.timeLimit||0}); s.code=code; s.host=G.host; s.hostName=G.hostName; s.createdAt=G.createdAt;
   busy=true; const ok=await commit(s); busy=false; if(!ok){ await refetch(); toast('請再按一次開始'); }
 };
 
@@ -876,6 +947,9 @@ function renderGame(){
   const myMove=me>=0&&wait.has(me); document.title=(myMove?'🔔 輪到你了！':'')+'帝國爭霸 線上版';
   // drawn-card flash for me
   if(me>=0&&s.newCard&&s.newCard.seat===me&&s.newCard.ids.length&&lastFx!==s.ver){ const key=s.newCard.at; if(lastFx!==key){ lastFx=key; if(Date.now()-key<5000) drawFx(s.newCard.ids[0]); } }
+  if(s.shuffledAt&&s.shuffledAt!==lastShuf){ const fresh=lastShuf!==null||Date.now()-s.shuffledAt<8000; lastShuf=s.shuffledAt;
+    if(fresh&&Date.now()-s.shuffledAt<8000){ const d=$('deck'); d.classList.remove('shuffling'); void d.offsetWidth; d.classList.add('shuffling'); setTimeout(()=>d.classList.remove('shuffling'),1900); toast('🔀 洗牌中…',1600); } }
+  if(s.rps&&s.rps.done&&rpsShown!==s.startedAt){ rpsShown=s.startedAt; if(s.phase==='draw'&&s.log.length<=4) openModal(`<h2>✊✌️✋ 猜拳結果</h2><div class="note" style="font-size:15px;color:var(--ink)">${escapeHtml(s.rps.last.text)}</div><div class="row" style="justify-content:flex-end"><button onclick="closeModal()">開始！</button></div>`); }
   const lbId=s.lastBattle?s.lastBattle.id:0;
   if(seenBattle===null) seenBattle=lbId;
   else if(lbId!==seenBattle){ seenBattle=lbId; if(s.lastBattle) showBattle(s.lastBattle); }
@@ -916,6 +990,15 @@ function renderStatus(me){
     const parts=s.refill.map(r=>`${N(r.seat)} 還能抽 <b>${r.n}</b> 張`).join('、');
     const mine=tapLeft(s,me);
     st.innerHTML=mine?`⚡ <b>搶牌！</b>快點牌堆，你還能抽 <b>${mine}</b> 張（${parts}）`:`⚡ 補牌搶牌中：${parts}`;
+    return;
+  }
+  if(s.phase==='rps'){
+    const g=s.rps, inIt=g.alive.includes(me), picked=me>=0&&g.picks[me];
+    const who=g.alive.map(i=>`${N(i)}${g.picks[i]?' ✔':' …'}`).join('、');
+    st.innerHTML=(g.last?`${escapeHtml(g.last.text)}<br>`:'')+`<b>✊✌️✋ 猜拳決定誰先出（第 ${g.round} 輪）</b><br>${who}`;
+    if(inIt&&!picked){ ['r','s','p'].forEach(k=>btn(RPS[k],()=>doAction(x=>actRps(x,me,k),{retry:true}),'rps')); }
+    else if(inIt) st.innerHTML+=`<br>你出了 ${RPS[g.picks[me]]}，等待其他人出拳…`;
+    else if(me>=0) st.innerHTML+='<br>你這輪沒有晉級，等待其他人決勝負…';
     return;
   }
   if(s.phase==='discard'){
@@ -977,10 +1060,23 @@ function showEnd(force){
   <div class="row" style="justify-content:flex-end">${(offline||s.host===PID)?'<button class="ghost" onclick="closeModal();restart()">再來一局</button>':''}<button onclick="closeModal()">關閉</button></div>`);
 }
 async function restart(){
-  const seats=G.seats.map(p=>({...p})); const s=newGame(seats);
+  const seats=G.seats.map(p=>({...p})); const s=newGame(seats,{timeLimit:G.timeLimit||0});
   if(!offline){s.code=code;s.host=G.host;s.hostName=G.hostName;s.createdAt=G.createdAt;}
   seenBattle=null; endShownVer=null; await commit(s);
 }
+/* ---- 倒數計時與時間到自動行動 ---- */
+let autoKey=null;
+setInterval(()=>{
+  const el=$('timer');
+  if(!G||mode!=='game'||G.status!=='playing'||!G.deadline){ el.classList.add('hidden'); return; }
+  const now=Date.now(), left=Math.max(0,Math.ceil((G.deadline-now)/1000));
+  el.classList.remove('hidden'); el.textContent='⏰ '+left+' 秒'; el.classList.toggle('low',left<=10);
+  const runner=offline||G.host===PID;
+  if(!busy&&timedOut(G,now-(runner?300:3500))&&autoKey!==G.ver){
+    autoKey=G.ver; const s=clone(G);
+    try{ if(autoTimeout(s)) commit(s).then(ok=>{ if(!ok) refetch(); }); }catch(e){ console.error(e); }
+  }
+},250);
 window.closeModal=closeModal; window.restart=restart;
 init();
 </script>
