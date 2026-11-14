@@ -46,6 +46,9 @@ header.top .sub{color:#c8bda3;font-size:13px}
 svg#map{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;user-select:none;-webkit-user-select:none}
 .region{cursor:pointer}
 .region circle.body{stroke-width:3}
+.edge.hl{stroke:#ffd76a!important;opacity:1!important;stroke-width:3.2!important;stroke-dasharray:none!important}
+svg.nolines .edge.land:not(.hl){display:none}
+.zoom button.off{opacity:.45}
 .region text{pointer-events:none}
 .region.sel circle.ring{stroke:#fff;stroke-width:4;opacity:1}
 .region.target circle.ring{stroke:#ffe27a;stroke-width:3;opacity:1;stroke-dasharray:6 4;animation:spin 3s linear infinite}
@@ -196,7 +199,7 @@ details summary{cursor:pointer;color:var(--gold);font-weight:700}
       <div class="gmain">
         <div class="mapwrap" id="mapwrap">
           <svg id="map" viewBox="0 0 1000 565"></svg>
-          <div class="zoom"><button id="zIn" aria-label="放大">＋</button><button id="zOut" aria-label="縮小">－</button><button id="zFit" aria-label="全圖" style="font-size:15px">全</button></div>
+          <div class="zoom"><button id="zIn" aria-label="放大">＋</button><button id="zOut" aria-label="縮小">－</button><button id="zFit" aria-label="全圖" style="font-size:15px">全</button><button id="zLines" aria-label="顯示攻擊線" style="font-size:15px">線</button></div>
           <div class="legend" id="legend"></div>
         </div>
         <div class="bar">
@@ -687,8 +690,8 @@ function buildMap(){
   el('g',{id:'landLayer'},svg);
   const ge=el('g',{id:'edgeLayer'},svg);
   EDGES.forEach(([a,b,wrap])=>{const A=R[a],B=R[b], sea=isSea(a,b);
-    const at={class:sea?'edge sea':'edge land',stroke:sea?'#f3ead6':'#1a1a1a','stroke-width':sea?2:1.4,opacity:sea?.75:.35};
-    if(sea) at['stroke-dasharray']='2 5', at['stroke-linecap']='round';
+    const at={class:sea?'edge sea':'edge land','data-a':a,'data-b':b,stroke:'#ffffff','stroke-width':sea?2.2:1.5,opacity:sea?.85:.45,'stroke-linecap':'round'};
+    if(sea) at['stroke-dasharray']='1 6';
     if(wrap){ el('line',{...at,x1:A.x,y1:A.y,x2:0,y2:A.y-6},ge); el('line',{...at,x1:B.x,y1:B.y,x2:1000,y2:B.y+6},ge);}
     else el('line',{...at,x1:A.x,y1:A.y,x2:B.x,y2:B.y},ge);});
   const gr=el('g',{},svg);
@@ -715,7 +718,7 @@ async function loadLand(){
     el('path',{d,fill:'#e8dcc0'},layer);
     const vor=d3.Delaunay.from(REGIONS,r=>r.x,r=>r.y).voronoi([-20,-20,1020,585]);
     const cells=el('g',{'clip-path':'url(#landclip)'},layer);
-    REGIONS.forEach((r,i)=>el('path',{id:'cell-'+r.id,d:vor.renderCell(i),fill:CONT[r.c].color,'fill-opacity':.55,stroke:'#0f1c2e','stroke-opacity':.35,'stroke-width':1},cells));
+    REGIONS.forEach((r,i)=>el('path',{id:'cell-'+r.id,d:vor.renderCell(i),fill:CONT[r.c].color,'fill-opacity':.55,stroke:'none'},cells));
     el('path',{d,fill:'none',stroke:'#0b1626','stroke-width':1.3,'stroke-opacity':.8},layer);
     LAND_OK=true; if(G&&mode==='game') renderGame();
   }catch(e){ console.warn('世界地圖載入失敗，改用簡易地圖',e); }
@@ -737,6 +740,10 @@ window.addEventListener('resize',()=>{ const oldFit=fitW, ratio=vb.w/oldFit; mea
 $('zIn').onclick=()=>zoomAt(1.5,vb.cx,vb.cy);
 $('zOut').onclick=()=>zoomAt(1/1.5,vb.cx,vb.cy);
 $('zFit').onclick=()=>fitMap(true);
+let showLines=store.get('impera_lines')!=='0';
+function applyLines(){ svg.classList.toggle('nolines',!showLines); $('zLines').classList.toggle('off',!showLines); }
+$('zLines').onclick=()=>{ showLines=!showLines; store.set('impera_lines',showLines?'1':'0'); applyLines(); };
+applyLines();
 svg.addEventListener('wheel',e=>{ e.preventDefault(); const p=toSvg(e.clientX,e.clientY); zoomAt(e.deltaY<0?1.15:1/1.15,p.x,p.y); },{passive:false});
 const ptrs=new Map(); let gest=null;
 svg.addEventListener('pointerdown',e=>{
@@ -771,8 +778,9 @@ window.addEventListener('pointerup',endPtr); window.addEventListener('pointercan
 function clickRegion(id){
   if(!G||G.status!=='playing') return;
   const me=mySeat(), r=R[id];
-  if(me<0||G.turn!==me||G.phase!=='action'){ toast(`${r.name}（${CONT[r.c].name}）戰力 ${r.v}・相鄰：${[...ADJ[id]].map(nm).join('、')}`,3500); return; }
+  if(me<0||G.turn!==me||G.phase!=='action'){ ui.peek=ui.peek===id?null:id; renderGame(); toast(`${r.name}（${CONT[r.c].name}）戰力 ${r.v}・相鄰：${[...ADJ[id]].map(nm).join('、')}`,3500); return; }
   const o=G.owned[id];
+  ui.peek=null;
   if(o===me){ ui.from=ui.from===id?null:id; if(ui.to&&!(ui.from&&ADJ[ui.from].has(ui.to))) ui.to=null; }
   else if(o!==undefined){
     if(ui.from&&ADJ[ui.from].has(id)) ui.to=ui.to===id?null:id;
@@ -809,6 +817,8 @@ function renderGame(){
     g.classList.toggle('battle',!!(s.battle&&(s.battle.from===r.id||s.battle.to===r.id)));
     g.style.opacity=(s.status==='ended'&&o!==undefined&&!hl.has(r.id))?.45:1;
   });
+  const focus=ui.from||ui.peek;
+  svg.querySelectorAll('.edge').forEach(e=>e.classList.toggle('hl',!!focus&&(e.dataset.a===focus||e.dataset.b===focus)));
   // seats
   const wait=new Set(waitingOn(s)), sb_=$('seats'); sb_.innerHTML='';
   s.seats.forEach((p,i)=>{
