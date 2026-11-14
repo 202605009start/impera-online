@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14243a">
+<meta name="color-scheme" content="only dark">
+<meta name="darkreader-lock">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>帝國爭霸 線上版</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -12,7 +14,10 @@
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
 <style>
-:root{--sea:#14243a;--sea2:#1b3150;--ink:#2b2118;--parch:#f3ead6;--parch2:#e6d8b8;--gold:#d9a93f;--muted:#7c6a50;--red:#b23a2e}
+/* 頁面本身就是深色：宣告支援深色模式，避免三星瀏覽器等強制反轉顏色 */
+@media (prefers-color-scheme: dark){:root{--dark-ok:1}}
+@media (prefers-color-scheme: light){:root{--dark-ok:1}}
+:root{color-scheme:only dark;--sea:#14243a;--sea2:#1b3150;--ink:#2b2118;--parch:#f3ead6;--parch2:#e6d8b8;--gold:#d9a93f;--muted:#7c6a50;--red:#b23a2e}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0}
 body{font-family:"Noto Sans TC",system-ui,sans-serif;background:var(--sea);color:var(--parch);min-height:100vh}
@@ -71,8 +76,8 @@ svg.nolines .edge.land:not(.hl){display:none}
 .log div{padding:2px 0;border-bottom:1px dashed #ffffff12}
 .bar{background:var(--sea2);border:1px solid #ffffff1c;border-radius:14px;padding:10px 12px}
 .pilerow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.deck{position:relative;width:62px;height:84px;border-radius:9px;flex:none;cursor:default;background:repeating-linear-gradient(45deg,#7a2d22 0 6px,#8f3a2c 6px 12px);border:3px solid var(--parch2);box-shadow:3px 3px 0 #5a2018,6px 6px 0 #3e160f;display:grid;place-items:center;color:#fff;font-family:"Noto Serif TC",serif;font-weight:900;font-size:22px;text-shadow:0 2px 3px #000;transition:transform .12s}
-.deck small{position:absolute;bottom:3px;left:0;right:0;text-align:center;font-family:"Noto Sans TC";font-size:10px;font-weight:700}
+.deck{position:relative;width:62px;height:84px;display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:2px;line-height:1;border-radius:9px;flex:none;cursor:default;background:repeating-linear-gradient(45deg,#7a2d22 0 6px,#8f3a2c 6px 12px);border:3px solid var(--parch2);box-shadow:3px 3px 0 #5a2018,6px 6px 0 #3e160f;display:grid;place-items:center;color:#fff;font-family:"Noto Serif TC",serif;font-weight:900;font-size:22px;text-shadow:0 2px 3px #000;transition:transform .12s}
+.deck small{font-family:"Noto Sans TC";font-size:10px;font-weight:700;white-space:nowrap;letter-spacing:-.5px}
 .deck.can{cursor:pointer;animation:glow 1s ease-in-out infinite alternate}
 .deck.can:active{transform:scale(.94)}
 @keyframes glow{from{box-shadow:3px 3px 0 #5a2018,6px 6px 0 #3e160f,0 0 0 #ffd76a}to{box-shadow:3px 3px 0 #5a2018,6px 6px 0 #3e160f,0 0 18px 4px #ffd76a}}
@@ -122,7 +127,7 @@ details summary{cursor:pointer;color:var(--gold);font-weight:700}
   body.showside .side{display:flex;position:fixed;inset:0;z-index:30;background:var(--sea);overflow:auto;padding:12px 12px calc(12px + env(safe-area-inset-bottom))}
   body.showside .side .close{display:block}
   .mobonly{display:inline-block}
-  .deck{width:48px;height:64px;font-size:18px;box-shadow:2px 2px 0 #5a2018,4px 4px 0 #3e160f}
+  .deck{width:56px;height:74px;font-size:20px;box-shadow:2px 2px 0 #5a2018,4px 4px 0 #3e160f}
   .pilerow{margin-bottom:4px;gap:8px}
   .pilerow button{padding:7px 10px;font-size:13px;white-space:nowrap}
   .status{font-size:13px;margin-bottom:2px}
@@ -702,7 +707,9 @@ function buildMap(){
     el('circle',{class:'ring',r:26,fill:'#ffffff00','pointer-events':'all',opacity:0},g);
     el('circle',{class:'body',r:15,fill:'#f3ead6',stroke:CONT[r.c].color,filter:'url(#sh)'},g);
     const v=el('text',{'text-anchor':'middle',y:5.5,'font-size':16,'font-weight':900,fill:'#2b2118'},g); v.textContent=r.v;
-    const t=el('text',{'text-anchor':'middle',y:30,'font-size':12.5,'font-weight':700,fill:'#fff',stroke:'#0b1626','stroke-width':3.5,'stroke-linejoin':'round','paint-order':'stroke'},g); t.textContent=r.name;
+    const lw=r.name.length*12.5+8;
+    el('rect',{x:-lw/2,y:18.5,width:lw,height:16,rx:5,fill:'#0b1626','fill-opacity':.78},g);
+    const t=el('text',{'text-anchor':'middle',y:31,'font-size':12.5,'font-weight':700,fill:'#ffffff'},g); t.textContent=r.name;
   });
   $('legend').innerHTML=Object.values(CONT).map(c=>`<span><i style="background:${c.color}"></i>${c.name}</span>`).join('');
   loadLand();
