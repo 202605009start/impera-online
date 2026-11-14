@@ -303,9 +303,22 @@ function drawN(s,seat,n){
   }
   return got;
 }
+const HAND_LIMIT=10;
 function endTurn(s){
   if(s.ending){finish(s);return;}
-  s.turn=(s.turn+1)%s.seats.length; s.phase='draw'; s.pending=0; s.refill=null;
+  s.pending=0; s.refill=null;
+  const over=s.hands[s.turn].length-HAND_LIMIT;
+  if(over>0){ s.phase='discard'; s.pending=over; return; }   // 回合結束：手牌上限 10 張
+  s.turn=(s.turn+1)%s.seats.length; s.phase='draw';
+}
+function actDiscard(s,seat,idxs){
+  if(s.status!=='playing'||s.phase!=='discard'||s.turn!==seat) throw new Error('現在不需要棄牌');
+  const need=s.hands[seat].length-HAND_LIMIT;
+  if(new Set(idxs).size!==need) throw new Error(`請選剛好 ${need} 張要棄掉的牌`);
+  const cards=takeCards(s.hands[seat],idxs);
+  s.discard.push(...cards);
+  addLog(s,`${seatName(s,seat)} 手牌超過 ${HAND_LIMIT} 張，棄掉 ${cards.length} 張。`);
+  s.pending=0; s.turn=(s.turn+1)%s.seats.length; s.phase='draw';
 }
 function components(s,seat){
   const mine=Object.keys(s.owned).filter(k=>s.owned[k]===seat), seen=new Set(), comps=[];
@@ -400,6 +413,7 @@ function waitingOn(s){
   if(s.status!=='playing') return [];
   if(s.phase==='defend') return [s.battle.defender];
   if(s.phase==='refill') return s.refill.filter(r=>r.n>0).map(r=>r.seat);
+  if(s.phase==='discard') return [s.turn];
   return [s.turn];
 }
 
@@ -452,7 +466,13 @@ function botActor(s){
   for(const seat of waitingOn(s)) if(s.seats[seat].bot) return seat;
   return -1;
 }
+function botDiscard(s,seat){
+  const hand=s.hands[seat], need=hand.length-HAND_LIMIT, best=bestCompSet(s,seat);
+  const keep=c=>(s.owned[c]===seat?(best.has(c)?100:40):0)+(s.owned[c]===undefined?20:0)+R[c].v;
+  return hand.map((c,i)=>[keep(c),i]).sort((a,b)=>a[0]-b[0]).slice(0,need).map(x=>x[1]);
+}
 function runBot(s,seat){
+  if(s.phase==='discard') { actDiscard(s,seat,botDiscard(s,seat)); return; }
   if(s.phase==='defend') actDefend(s,seat,botDefense(s,seat));
   else if(s.phase==='draw'||s.phase==='draw2'||s.phase==='refill') actTap(s,seat);
   else { const a=botAction(s,seat);
@@ -468,6 +488,7 @@ const RULES=`<p><b>目標：</b>遊戲結束時，擁有最大「連成一片」
 <p><b>你的回合：</b>先<b>點牌堆抽 1 張</b>，再選一個行動：</p>
 <p>① <b>抽 2 張牌</b>（點牌堆兩次）<br>② <b>打出地區</b>：把一張「還沒有人佔領」的地區放上地圖。<br>③ <b>進攻</b>：從你的地區攻擊<b>相鄰</b>的對手地區。你先暗中投入任意張手牌當援軍，防守方看到張數後也暗中投入。地區戰力＋援軍總和，<b>進攻方較大</b>才奪下（平手防守方贏）。</p>
 <p><b>補牌搶牌：</b>投入的牌全進棄牌堆。之後進攻方可抽回最多 2 張、防守方最多 3 張（不超過自己投入的張數），雙方<b>同時點牌堆搶牌</b>，先點先得！</p>
+<p><b>手牌上限：</b>回合結束時手牌最多 10 張，超過要自己選牌棄掉。</p>
 <p><b>結束：</b>2–3 人局牌庫第一次抽完把棄牌洗回，第二次抽完結束；4–5 人局牌庫抽完立即結束。</p>
 <p><b>計分：</b>你最大的一片相連領土，每個地區 1 分；手上每張與這片領土相同地區的牌再 +1 分。</p>
 <p><b>地圖操作：</b>雙指縮放、單指拖曳，或用右上角 ＋／－／全。</p>`;
@@ -847,7 +868,7 @@ function renderGame(){
     d.innerHTML=`<span class="dot" style="background:${p.color}"></span>`;
     const n=document.createElement('span'); n.textContent=(p.bot?'🤖 ':'')+p.name+(i===me?'（你）':''); d.appendChild(n);
     const m=document.createElement('span'); m.className='meta';
-    m.innerHTML=`手牌 ${s.hands[i].length}・領土 ${terr}<br>最大相連 ${big}`+(i===me?`・得分 ${scoreOf(s,i).score}`:'');
+    m.innerHTML=`手牌 ${s.hands[i].length}・領土 ${terr}<br>最大相連 ${big}`;
     d.appendChild(m); sb_.appendChild(d);
   });
   const lg=$('log'); lg.innerHTML=''; s.log.slice().reverse().forEach(t=>{const d=document.createElement('div');d.textContent=t;lg.appendChild(d);});
@@ -895,6 +916,15 @@ function renderStatus(me){
     const parts=s.refill.map(r=>`${N(r.seat)} 還能抽 <b>${r.n}</b> 張`).join('、');
     const mine=tapLeft(s,me);
     st.innerHTML=mine?`⚡ <b>搶牌！</b>快點牌堆，你還能抽 <b>${mine}</b> 張（${parts}）`:`⚡ 補牌搶牌中：${parts}`;
+    return;
+  }
+  if(s.phase==='discard'){
+    const need=s.hands[s.turn].length-HAND_LIMIT;
+    if(s.turn===me){
+      st.innerHTML=`<b>回合結束：</b>手牌最多 ${HAND_LIMIT} 張，請選 <b>${need}</b> 張棄掉（已選 ${ui.sel.size} 張）。`;
+      btn(`棄掉 ${ui.sel.size}/${need} 張`,()=>doAction(x=>actDiscard(x,me,[...ui.sel])),'danger',ui.sel.size!==need);
+      if(ui.sel.size) btn('清除',()=>{ui.sel.clear();renderGame();},'ghost');
+    } else st.innerHTML=`等待 <b>${N(s.turn)}</b> 棄牌到 ${HAND_LIMIT} 張…`;
     return;
   }
   if(s.phase==='defend'){
