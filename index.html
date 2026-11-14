@@ -9,6 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
 <style>
 :root{--sea:#14243a;--sea2:#1b3150;--ink:#2b2118;--parch:#f3ead6;--parch2:#e6d8b8;--gold:#d9a93f;--muted:#7c6a50;--red:#b23a2e}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -40,10 +42,10 @@ header.top .sub{color:#c8bda3;font-size:13px}
 /* ---- game layout (desktop) ---- */
 .gwrap{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:12px}
 .gmain{display:flex;flex-direction:column;gap:10px;min-width:0}
-.mapwrap{position:relative;aspect-ratio:1000/560;background:radial-gradient(ellipse at 50% 40%,#22406a,#122136 75%);border-radius:14px;border:1px solid #ffffff1c;overflow:hidden}
+.mapwrap{position:relative;aspect-ratio:1000/565;background:radial-gradient(ellipse at 50% 45%,#2a5a8c,#173456 70%,#10243d);border-radius:14px;border:1px solid #ffffff1c;overflow:hidden}
 svg#map{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;user-select:none;-webkit-user-select:none}
 .region{cursor:pointer}
-.region circle.body{stroke-width:4}
+.region circle.body{stroke-width:3}
 .region text{pointer-events:none}
 .region.sel circle.ring{stroke:#fff;stroke-width:4;opacity:1}
 .region.target circle.ring{stroke:#ffe27a;stroke-width:3;opacity:1;stroke-dasharray:6 4;animation:spin 3s linear infinite}
@@ -193,7 +195,7 @@ details summary{cursor:pointer;color:var(--gold);font-weight:700}
     <div class="gwrap">
       <div class="gmain">
         <div class="mapwrap" id="mapwrap">
-          <svg id="map" viewBox="0 0 1000 560"></svg>
+          <svg id="map" viewBox="0 0 1000 565"></svg>
           <div class="zoom"><button id="zIn" aria-label="放大">＋</button><button id="zOut" aria-label="縮小">－</button><button id="zFit" aria-label="全圖" style="font-size:15px">全</button></div>
           <div class="legend" id="legend"></div>
         </div>
@@ -231,16 +233,19 @@ const CONT = {
   na:{name:'北美洲',color:'#2f9aa0'}, sa:{name:'南美洲',color:'#62b84c'}, eu:{name:'歐洲',color:'#7b5ea8'},
   af:{name:'非洲',color:'#d9a63a'}, as:{name:'亞洲',color:'#d4473f'}, oc:{name:'大洋洲',color:'#e8843a'}
 };
+// [id, 名稱, 戰力, 洲, 經度, 緯度] → 以麥卡托投影換算到 1000×565 的地圖座標
+const MAP_W=1000, MAP_H=565, MERC_S=1000/(2*Math.PI), MERC_Y=Math.log(Math.tan(Math.PI/4+78*Math.PI/360));
+function mercXY(lon,lat){ return [((lon+170)%360+360)%360/360*1000, (MERC_Y-Math.log(Math.tan(Math.PI/4+lat*Math.PI/360)))*MERC_S]; }
 const REGIONS = [
-  ['alaska','阿拉斯加',5,'na',60,100],['arctic','北美極地',4,'na',200,80],['greenland','格陵蘭',1,'na',360,50],
-  ['quebec','魁北克',2,'na',300,150],['amfed','美國聯邦',6,'na',190,195],['central','中美洲',3,'na',215,290],
-  ['venez','委內瑞拉',3,'sa',300,330],['amaz','亞馬遜',4,'sa',350,410],['andes','安第斯山脈',6,'sa',255,430],['pampas','彭巴草原',1,'sa',300,510],
-  ['kotn','英國',2,'eu',425,120],['scan','斯堪地那維亞',4,'eu',525,62],['weu','西歐',6,'eu',470,195],['eeu','東歐',3,'eu',560,160],['erus','歐洲俄羅斯',5,'eu',655,105],
-  ['magh','馬格里布',6,'af',480,270],['atl','西非',5,'af',440,350],['cafr','中非',1,'af',525,335],['eafr','東非',3,'af',610,330],['safr','南非',2,'af',545,440],
-  ['meast','中東',4,'as',655,240],['nasia','北亞',5,'as',790,95],['mongol','蒙古帝國',6,'as',770,195],['japan','日本',3,'as',885,200],
-  ['india','印度',2,'as',705,300],['indo','印度支那',1,'as',790,290],
-  ['malay','馬來群島',1,'oc',790,385],['ng','新幾內亞',4,'oc',905,375],['aus','澳洲',5,'oc',860,460],['nz','紐西蘭',2,'oc',960,525]
-].map(([id,name,v,c,x,y])=>({id,name,v,c,x,y}));
+  ['alaska','阿拉斯加',5,'na',-150,64],['arctic','北美極地',4,'na',-108,66],['greenland','格陵蘭',1,'na',-42,73],
+  ['quebec','魁北克',2,'na',-72,53],['amfed','美國聯邦',6,'na',-100,40],['central','中美洲',3,'na',-96,19],
+  ['venez','委內瑞拉',3,'sa',-70,8],['amaz','亞馬遜',4,'sa',-53,-7],['andes','安第斯山脈',6,'sa',-72,-16],['pampas','彭巴草原',1,'sa',-64,-36],
+  ['kotn','英國',2,'eu',-6,57],['scan','斯堪地那維亞',4,'eu',16,64],['weu','西歐',6,'eu',3,45],['eeu','東歐',3,'eu',26,48],['erus','歐洲俄羅斯',5,'eu',44,57],
+  ['magh','馬格里布',6,'af',2,28],['atl','西非',5,'af',-7,11],['cafr','中非',1,'af',20,0],['eafr','東非',3,'af',38,10],['safr','南非',2,'af',25,-26],
+  ['meast','中東',4,'as',47,29],['nasia','北亞',5,'as',100,63],['mongol','蒙古帝國',6,'as',103,38],['japan','日本',3,'as',139,37],
+  ['india','印度',2,'as',78,21],['indo','印度支那',1,'as',103,15],
+  ['malay','馬來群島',1,'oc',112,0],['ng','新幾內亞',4,'oc',143,-6],['aus','澳洲',5,'oc',134,-25],['nz','紐西蘭',2,'oc',172,-41]
+].map(([id,name,v,c,lon,lat])=>{const [x,y]=mercXY(lon,lat);return {id,name,v,c,lon,lat,x:Math.round(x),y:Math.round(y)};});
 const R = Object.fromEntries(REGIONS.map(r=>[r.id,r]));
 const EDGES = [
  ['alaska','arctic'],['alaska','nasia',1],['arctic','quebec'],['arctic','amfed'],['quebec','amfed'],['quebec','greenland'],
@@ -667,40 +672,65 @@ function maybeBot(){
 const svgNS='http://www.w3.org/2000/svg';
 function el(tag,attrs={},parent){const e=document.createElementNS(svgNS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);parent&&parent.appendChild(e);return e;}
 const svg=$('map');
+const SEA=new Set(['alaska|nasia','quebec|greenland','greenland|kotn','kotn|weu','amaz|atl','eeu|eafr','malay|ng','malay|aus','ng|aus','aus|nz']);
+const isSea=(a,b)=>SEA.has(a+'|'+b)||SEA.has(b+'|'+a);
+let LAND_OK=false;
 function buildMap(){
   svg.innerHTML='';
   const defs=el('defs',{},svg);
   const f=el('filter',{id:'sh',x:'-50%',y:'-50%',width:'200%',height:'200%'},defs);
-  el('feDropShadow',{dx:0,dy:2,stdDeviation:2.5,'flood-opacity':.5},f);
+  el('feDropShadow',{dx:0,dy:1.5,stdDeviation:1.8,'flood-opacity':.55},f);
   el('rect',{x:-2000,y:-2000,width:5000,height:5000,fill:'transparent'},svg);
-  const g0=el('g',{opacity:.08,stroke:'#fff'},svg);
-  for(let x=0;x<=1000;x+=50) el('line',{x1:x,y1:0,x2:x,y2:560},g0);
-  for(let y=0;y<=560;y+=50) el('line',{x1:0,y1:y,x2:1000,y2:y},g0);
-  const ge=el('g',{stroke:'#e9dcb8',opacity:.45,'stroke-width':2},svg);
-  EDGES.forEach(([a,b,wrap])=>{const A=R[a],B=R[b];
-    if(wrap){ el('line',{x1:A.x,y1:A.y,x2:0,y2:A.y-8,'stroke-dasharray':'5 5'},ge); el('line',{x1:B.x,y1:B.y,x2:1000,y2:B.y+8,'stroke-dasharray':'5 5'},ge);}
-    else el('line',{x1:A.x,y1:A.y,x2:B.x,y2:B.y},ge);});
+  const g0=el('g',{opacity:.07,stroke:'#fff'},svg);
+  for(let x=0;x<=1000;x+=50) el('line',{x1:x,y1:0,x2:x,y2:565},g0);
+  for(let y=0;y<=565;y+=50) el('line',{x1:0,y1:y,x2:1000,y2:y},g0);
+  el('g',{id:'landLayer'},svg);
+  const ge=el('g',{id:'edgeLayer'},svg);
+  EDGES.forEach(([a,b,wrap])=>{const A=R[a],B=R[b], sea=isSea(a,b);
+    const at={class:sea?'edge sea':'edge land',stroke:sea?'#f3ead6':'#1a1a1a','stroke-width':sea?2:1.4,opacity:sea?.75:.35};
+    if(sea) at['stroke-dasharray']='2 5', at['stroke-linecap']='round';
+    if(wrap){ el('line',{...at,x1:A.x,y1:A.y,x2:0,y2:A.y-6},ge); el('line',{...at,x1:B.x,y1:B.y,x2:1000,y2:B.y+6},ge);}
+    else el('line',{...at,x1:A.x,y1:A.y,x2:B.x,y2:B.y},ge);});
   const gr=el('g',{},svg);
   REGIONS.forEach(r=>{
     const g=el('g',{class:'region',id:'rg-'+r.id,'data-id':r.id,transform:`translate(${r.x},${r.y})`},gr);
-    el('circle',{class:'ring',r:33,fill:'#ffffff00','pointer-events':'all',opacity:0},g);
-    el('circle',{class:'body',r:22,fill:'#e9e4d8',stroke:CONT[r.c].color,filter:'url(#sh)'},g);
-    const v=el('text',{'text-anchor':'middle',y:7,'font-size':20,'font-weight':900,fill:'#2b2118'},g); v.textContent=r.v;
-    const t=el('text',{'text-anchor':'middle',y:42,'font-size':13,'font-weight':700,fill:'#f3ead6',stroke:'#0f1c2e','stroke-width':3,'paint-order':'stroke'},g); t.textContent=r.name;
+    el('circle',{class:'ring',r:26,fill:'#ffffff00','pointer-events':'all',opacity:0},g);
+    el('circle',{class:'body',r:15,fill:'#f3ead6',stroke:CONT[r.c].color,filter:'url(#sh)'},g);
+    const v=el('text',{'text-anchor':'middle',y:5.5,'font-size':16,'font-weight':900,fill:'#2b2118'},g); v.textContent=r.v;
+    const t=el('text',{'text-anchor':'middle',y:29,'font-size':11.5,'font-weight':700,fill:'#fff',stroke:'#0f1c2e','stroke-width':3,'paint-order':'stroke'},g); t.textContent=r.name;
   });
   $('legend').innerHTML=Object.values(CONT).map(c=>`<span><i style="background:${c.color}"></i>${c.name}</span>`).join('');
+  loadLand();
+}
+async function loadLand(){
+  try{
+    if(!window.d3||!window.topojson) return;
+    const w=await (await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json')).json();
+    const land=topojson.feature(w,w.objects.land);
+    const proj=d3.geoMercator().rotate([-10,0]).scale(MERC_S).translate([500,MERC_Y*MERC_S]).clipExtent([[0,0],[1000,565]]);
+    const d=d3.geoPath(proj)(land);
+    const layer=$('landLayer'); layer.innerHTML='';
+    const defs=svg.querySelector('defs');
+    const cp=el('clipPath',{id:'landclip'},defs); el('path',{d},cp);
+    el('path',{d,fill:'#e8dcc0'},layer);
+    const vor=d3.Delaunay.from(REGIONS,r=>r.x,r=>r.y).voronoi([-20,-20,1020,585]);
+    const cells=el('g',{'clip-path':'url(#landclip)'},layer);
+    REGIONS.forEach((r,i)=>el('path',{id:'cell-'+r.id,d:vor.renderCell(i),fill:CONT[r.c].color,'fill-opacity':.55,stroke:'#0f1c2e','stroke-opacity':.35,'stroke-width':1},cells));
+    el('path',{d,fill:'none',stroke:'#0b1626','stroke-width':1.3,'stroke-opacity':.8},layer);
+    LAND_OK=true; if(G&&mode==='game') renderGame();
+  }catch(e){ console.warn('世界地圖載入失敗，改用簡易地圖',e); }
 }
 buildMap();
-let vb={cx:500,cy:280,w:1000}, fitW=1000, aspect=0.56;
-function measure(){ const r=$('mapwrap').getBoundingClientRect(); if(r.width>0&&r.height>0) aspect=r.height/r.width; fitW=aspect>0.56?1000:560/aspect; }
+let vb={cx:500,cy:282,w:1000}, fitW=1000, aspect=0.56;
+function measure(){ const r=$('mapwrap').getBoundingClientRect(); if(r.width>0&&r.height>0) aspect=r.height/r.width; fitW=aspect>0.565?1000:565/aspect; }
 function applyVB(){
   vb.w=Math.max(fitW*0.22,Math.min(fitW*1.05,vb.w));
   const w=vb.w,h=w*aspect;
   vb.cx=w>=1000?500:Math.max(w/2-40,Math.min(1000-w/2+40,vb.cx));
-  vb.cy=h>=560?280:Math.max(h/2-30,Math.min(560-h/2+30,vb.cy));
+  vb.cy=h>=565?282:Math.max(h/2-30,Math.min(565-h/2+30,vb.cy));
   svg.setAttribute('viewBox',`${vb.cx-w/2} ${vb.cy-h/2} ${w} ${h}`);
 }
-function fitMap(full){ measure(); vb={cx:500,cy:280,w:(full!==true&&aspect>1)?600:fitW}; applyVB(); }
+function fitMap(full){ measure(); vb={cx:500,cy:282,w:(full!==true&&aspect>1)?600:fitW}; applyVB(); }
 function toSvg(clientX,clientY){ const r=svg.getBoundingClientRect(), w=vb.w, h=w*aspect; return {x:vb.cx-w/2+(clientX-r.left)/r.width*w, y:vb.cy-h/2+(clientY-r.top)/r.height*h}; }
 function zoomAt(f,px,py){ const nw=Math.max(fitW*0.22,Math.min(fitW*1.05,vb.w/f)), k=nw/vb.w; vb.cx=px+(vb.cx-px)*k; vb.cy=py+(vb.cy-py)*k; vb.w=nw; applyVB(); }
 window.addEventListener('resize',()=>{ const oldFit=fitW, ratio=vb.w/oldFit; measure(); vb.w=fitW*ratio; applyVB(); });
@@ -768,8 +798,11 @@ function renderGame(){
   const hl=new Set(); if(s.status==='ended'&&s.result) s.result.scores.forEach(x=>x.comp.forEach(c=>hl.add(c)));
   REGIONS.forEach(r=>{
     const g=$('rg-'+r.id), o=s.owned[r.id], body=g.querySelector('circle.body');
-    body.setAttribute('fill',o===undefined?'#e9e4d8':s.seats[o].color);
-    body.setAttribute('r',o===undefined?20:24);
+    body.setAttribute('fill',o===undefined?'#f3ead6':s.seats[o].color);
+    body.setAttribute('stroke',o===undefined?CONT[r.c].color:'#fff');
+    body.setAttribute('r',o===undefined?15:17);
+    const cell=document.getElementById('cell-'+r.id);
+    if(cell){ cell.setAttribute('fill',o===undefined?CONT[r.c].color:s.seats[o].color); cell.setAttribute('fill-opacity',o===undefined?.4:.85); }
     g.querySelector('text').setAttribute('fill',o===undefined||DARK_TEXT.has(s.seats[o].color)?'#2b2118':'#fff');
     g.classList.toggle('sel',ui.from===r.id||ui.to===r.id);
     g.classList.toggle('target',atkTargets.has(r.id)&&ui.to!==r.id);
@@ -815,7 +848,7 @@ function renderHand(me){
   order.forEach(i=>{
     const id=hand[i], r=R[id], o=s.owned[id];
     const c=document.createElement('div'); c.className='card'+(ui.sel.has(i)?' sel':'')+(isNew.has(i)?' new':'');
-    const tag=o===undefined?'<span class="tag ok">可打出</span>':(o===me?(best.has(id)?'<span class="tag star">★+1分</span>':'<span class="tag star">我的</span>'):'<span class="tag taken">'+escapeHtml(s.seats[o].name)+'</span>');
+    const tag=o===undefined?'<span class="tag ok">可打出</span>':(o===me?'<span class="tag star">+1</span>':'<span class="tag taken">'+escapeHtml(s.seats[o].name)+'</span>');
     c.innerHTML=`<div class="cn">${r.name}</div><span class="cc" style="background:${CONT[r.c].color}">${CONT[r.c].name}</span><div class="cv">${r.v}</div>${tag}`;
     c.onclick=()=>{ if(ui.sel.has(i)) ui.sel.delete(i); else ui.sel.add(i); renderGame(); };
     box.appendChild(c);
