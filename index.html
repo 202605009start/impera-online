@@ -165,7 +165,8 @@ details summary{cursor:pointer;color:var(--gold);font-weight:700}
       <div class="panel">
         <h2>開始遊戲</h2>
         <div class="row"><label>暱稱</label><input id="nick" maxlength="12" placeholder="輸入你的名字" style="flex:1"></div>
-        <div class="row"><label>每回合時間</label><select id="timeSel"><option value="0">不限時</option><option value="30">30 秒</option><option value="60">60 秒</option><option value="90">90 秒</option></select><span class="note">（建立房間和單機都適用）</span></div>
+        <div class="row"><label>每回合時間</label><select id="timeSel"><option value="0">不限時</option><option value="30">30 秒</option><option value="60">60 秒</option><option value="90">90 秒</option></select></div>
+        <div class="row"><label>回合結束手牌上限</label><select id="handSel"><option value="0">不限制</option><option value="5">5 張</option><option value="6">6 張</option><option value="7">7 張</option><option value="8">8 張</option><option value="9">9 張</option><option value="10">10 張</option><option value="11">11 張</option><option value="12">12 張</option><option value="13">13 張</option><option value="14">14 張</option><option value="15">15 張</option></select><span class="note">（建立房間和單機都適用）</span></div>
         <div id="onlineBox">
           <div class="row"><button id="btnCreate">建立線上房間</button></div>
           <div class="row"><input id="joinCode" maxlength="4" placeholder="房號" autocapitalize="characters" style="width:110px;text-transform:uppercase"><button id="btnJoin" class="ghost">加入房間</button></div>
@@ -197,6 +198,9 @@ details summary{cursor:pointer;color:var(--gold);font-weight:700}
       <div id="roomPlayers" class="list" style="margin-top:10px"></div>
       <div id="hostCtrls" class="row hidden" style="margin-top:12px">
         <span>每回合時間：</span><select id="roomTime"><option value="0">不限時</option><option value="30">30 秒</option><option value="60">60 秒</option><option value="90">90 秒</option></select>
+      </div>
+      <div id="hostCtrls3" class="row hidden">
+        <span>回合結束手牌上限：</span><select id="roomHand"><option value="0">不限制</option><option value="5">5 張</option><option value="6">6 張</option><option value="7">7 張</option><option value="8">8 張</option><option value="9">9 張</option><option value="10">10 張</option><option value="11">11 張</option><option value="12">12 張</option><option value="13">13 張</option><option value="14">14 張</option><option value="15">15 張</option></select>
       </div>
       <div id="hostCtrls2" class="row hidden">
         <span>電腦玩家：</span>
@@ -302,7 +306,8 @@ function newGame(seats,opts){
     rps:{round:1,alive:seats.map((_,i)=>i),picks:{},last:null},
     log:[],ending:false,result:null,newCard:null,startedAt:Date.now(),shuffledAt:Date.now()};
   s.timeLimit=(opts&&opts.timeLimit)||0; stamp(s);
-  addLog(s,'洗牌完成，每人發 5 張。用剪刀石頭布決定誰先出！'+(s.timeLimit?`（每回合限時 ${s.timeLimit} 秒）`:''));
+  s.handLimit=opts&&opts.handLimit!==undefined?opts.handLimit:10;
+  addLog(s,'洗牌完成，每人發 5 張。用剪刀石頭布決定誰先出！'+(s.timeLimit?`（每回合限時 ${s.timeLimit} 秒）`:'')+(s.handLimit?`（回合結束手牌上限 ${s.handLimit} 張）`:'（手牌不限張數）'));
   return s;
 }
 function drawN(s,seat,n){
@@ -319,21 +324,22 @@ function drawN(s,seat,n){
   }
   return got;
 }
-const HAND_LIMIT=10;
+// 手牌上限：s.handLimit（0 = 不限制；未設定時預設 10）
+function handLimit(s){ return s.handLimit===undefined?10:s.handLimit; }
 function endTurn(s){
   if(s.ending){finish(s);return;}
   s.pending=0; s.refill=null;
-  const over=s.hands[s.turn].length-HAND_LIMIT;
+  const over=handLimit(s)?s.hands[s.turn].length-handLimit(s):0;
   if(over>0){ s.phase='discard'; s.pending=over; stamp(s); return; }   // 回合結束：手牌上限 10 張
   s.turn=(s.turn+1)%s.seats.length; s.phase='draw'; stamp(s);
 }
 function actDiscard(s,seat,idxs){
   if(s.status!=='playing'||s.phase!=='discard'||s.turn!==seat) throw new Error('現在不需要棄牌');
-  const need=s.hands[seat].length-HAND_LIMIT;
+  const need=s.hands[seat].length-handLimit(s);
   if(new Set(idxs).size!==need) throw new Error(`請選剛好 ${need} 張要棄掉的牌`);
   const cards=takeCards(s.hands[seat],idxs);
   s.discard.push(...cards);
-  addLog(s,`${seatName(s,seat)} 手牌超過 ${HAND_LIMIT} 張，棄掉 ${cards.length} 張。`);
+  addLog(s,`${seatName(s,seat)} 手牌超過 ${handLimit(s)} 張，棄掉 ${cards.length} 張。`);
   s.pending=0; s.turn=(s.turn+1)%s.seats.length; s.phase='draw'; stamp(s);
 }
 function components(s,seat){
@@ -529,7 +535,7 @@ function botActor(s){
   return -1;
 }
 function botDiscard(s,seat){
-  const hand=s.hands[seat], need=hand.length-HAND_LIMIT, best=bestCompSet(s,seat);
+  const hand=s.hands[seat], need=hand.length-handLimit(s), best=bestCompSet(s,seat);
   const keep=c=>(s.owned[c]===seat?(best.has(c)?100:40):0)+(s.owned[c]===undefined?20:0)+R[c].v;
   return hand.map((c,i)=>[keep(c),i]).sort((a,b)=>a[0]-b[0]).slice(0,need).map(x=>x[1]);
 }
@@ -553,7 +559,7 @@ const RULES=`<p><b>目標：</b>遊戲結束時，擁有最大「連成一片」
 <p>① <b>抽 2 張牌</b>（點牌堆兩次）<br>② <b>打出地區</b>：把一張「還沒有人佔領」的地區放上地圖。<br>③ <b>進攻</b>：從你的地區攻擊<b>相鄰</b>的對手地區。你先暗中投入任意張手牌當援軍，防守方看到張數後也暗中投入。地區戰力＋援軍總和，<b>進攻方較大</b>才奪下（平手防守方贏）。</p>
 <p><b>補牌搶牌：</b>投入的牌全進棄牌堆。之後進攻方可抽回最多 2 張、防守方最多 3 張（不超過自己投入的張數），雙方<b>同時點牌堆搶牌</b>，先點先得！</p>
 <p><b>時間限制：</b>房主可設定每回合 30／60／90 秒。時間到時：還沒抽牌就自動抽、還沒行動就自動「抽 2 張」、防守自動不出援軍、補牌自動抽完、猜拳隨機出。</p>
-<p><b>手牌上限：</b>回合結束時手牌最多 10 張，超過要自己選牌棄掉。</p>
+<p><b>手牌上限：</b>房主可設定回合結束時手牌最多幾張（5–15 張，預設 10 張，也可選不限制），超過要自己選牌棄掉。</p>
 <p><b>結束：</b>2–3 人局牌庫第一次抽完把棄牌洗回，第二次抽完結束；4–5 人局牌庫抽完立即結束。</p>
 <p><b>計分：</b>你最大的一片相連領土，每個地區 1 分；手上每張與這片領土相同地區的牌再 +1 分。</p>
 <p><b>地圖操作：</b>雙指縮放、單指拖曳，或用右上角 ＋／－／全。</p>`;
@@ -577,6 +583,9 @@ let busy=false, seenBattle=null, botTimer=null, botKey=null, endShownVer=null, l
 $('nick').value=store.get('impera_nick')||'';
 $('timeSel').value=store.get('impera_time')||'0';
 $('timeSel').addEventListener('change',()=>store.set('impera_time',$('timeSel').value));
+$('handSel').value=store.get('impera_hand')??'10';
+$('handSel').addEventListener('change',()=>store.set('impera_hand',$('handSel').value));
+const HL=g=>g&&g.handLimit!==undefined?g.handLimit:10;
 $('nick').addEventListener('change',()=>store.set('impera_nick',$('nick').value.trim()));
 function myName(){return ($('nick').value.trim()||'玩家').slice(0,12);}
 function toast(msg,ms){const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),ms||2600);}
@@ -622,7 +631,7 @@ async function createRoom(){
   const A='ABCDEFGHJKLMNPQRSTUVWXYZ';
   for(let k=0;k<6;k++){
     const c=Array.from({length:4},()=>A[Math.floor(Math.random()*A.length)]).join('');
-    const st={status:'lobby',code:c,host:PID,hostName:myName(),bots:0,timeLimit:+$('timeSel').value||0,createdAt:Date.now()};
+    const st={status:'lobby',code:c,host:PID,hostName:myName(),bots:0,timeLimit:+$('timeSel').value||0,handLimit:+$('handSel').value,createdAt:Date.now()};
     const {data,error}=await sb.rpc('impera_create',{p_code:c,p_state:st});
     if(error){ $('lobbyErr').textContent='連線錯誤：'+error.message; return; }
     if(data===true){ return enterRoom(c); }
@@ -691,7 +700,7 @@ $('btnSolo').onclick=()=>{
   const n=+$('soloBots').value, names=shuffle(BOT_NAMES);
   const seats=[{id:'local',name:myName(),bot:false,color:SEAT_COLORS[0]}];
   for(let i=0;i<n;i++) seats.push({id:'bot'+i,name:names[i],bot:true,color:SEAT_COLORS[i+1]});
-  G=newGame(seats,{timeLimit:+$('timeSel').value||0}); G.ver=1; onState();
+  G=newGame(seats,{timeLimit:+$('timeSel').value||0,handLimit:+$('handSel').value}); G.ver=1; onState();
 };
 
 /* ---- room ---- */
@@ -704,15 +713,17 @@ function renderRoom(){
     const n=document.createElement('span');n.textContent=p.name+(p.pid===G.host?'（房主）':'')+(p.pid===PID?'・你':'');it.appendChild(n);box.appendChild(it);});
   for(let i=0;i<bots;i++){const it=document.createElement('div');it.className='item';it.innerHTML=`<span class="dot" style="background:${SEAT_COLORS[Math.min(players.length,5)+i]||'#888'}"></span><span>🤖 電腦玩家 ${i+1}</span>`;box.appendChild(it);}
   if(players.length>5){const it=document.createElement('div');it.className='note';it.textContent=`另有 ${players.length-5} 人將以觀戰者身分加入。`;box.appendChild(it);}
+  $('hostCtrls3').classList.toggle('hidden',!isHost); $('roomHand').value=String(HL(G)); $('roomHand').disabled=busy;
   $('hostCtrls').classList.toggle('hidden',!isHost); $('hostCtrls2').classList.toggle('hidden',!isHost); $('guestWait').classList.toggle('hidden',isHost);
   $('roomTime').value=String(G.timeLimit||0); $('roomTime').disabled=busy;
-  $('timeInfo').textContent='每回合時間：'+(G.timeLimit?G.timeLimit+' 秒（時間到會自動行動）':'不限時');
+  $('timeInfo').textContent='每回合時間：'+(G.timeLimit?G.timeLimit+' 秒（時間到會自動行動）':'不限時')+'・回合結束手牌上限：'+(HL(G)?HL(G)+' 張':'不限制');
   $('botCount').textContent=bots;
   const total=Math.min(players.length,5)+bots;
   $('btnStart').disabled=busy||total<2||total>5; $('botPlus').disabled=busy||total>=5; $('botMinus').disabled=busy||bots<=0;
 }
 $('btnCopy').onclick=async()=>{ const url=location.origin+location.pathname+'#'+code; try{ await navigator.clipboard.writeText(url); toast('已複製：'+url); }catch(e){ toast(url,6000); } };
 async function lobbyUpdate(patch){ if(busy) return; busy=true; const s={...G,...patch}; const ok=await commit(s); busy=false; if(!ok){ await refetch(); } renderRoom(); }
+$('roomHand').onchange=()=>lobbyUpdate({handLimit:+$('roomHand').value});
 $('roomTime').onchange=()=>lobbyUpdate({timeLimit:+$('roomTime').value||0});
 $('botPlus').onclick=()=>lobbyUpdate({bots:(G.bots||0)+1});
 $('botMinus').onclick=()=>lobbyUpdate({bots:Math.max(0,(G.bots||0)-1)});
@@ -722,7 +733,7 @@ $('btnStart').onclick=async()=>{
   const seats=humans.map((p,i)=>({id:p.pid,name:p.name,bot:false,color:SEAT_COLORS[i]}));
   for(let i=0;i<(G.bots||0)&&seats.length<5;i++) seats.push({id:'bot'+i,name:names[i],bot:true,color:SEAT_COLORS[seats.length]});
   if(seats.length<2){ toast('至少要 2 個座位'); return; }
-  const s=newGame(seats,{timeLimit:G.timeLimit||0}); s.code=code; s.host=G.host; s.hostName=G.hostName; s.createdAt=G.createdAt;
+  const s=newGame(seats,{timeLimit:G.timeLimit||0,handLimit:HL(G)}); s.code=code; s.host=G.host; s.hostName=G.hostName; s.createdAt=G.createdAt;
   busy=true; const ok=await commit(s); busy=false; if(!ok){ await refetch(); toast('請再按一次開始'); }
 };
 
@@ -1002,12 +1013,12 @@ function renderStatus(me){
     return;
   }
   if(s.phase==='discard'){
-    const need=s.hands[s.turn].length-HAND_LIMIT;
+    const need=s.hands[s.turn].length-handLimit(s);
     if(s.turn===me){
-      st.innerHTML=`<b>回合結束：</b>手牌最多 ${HAND_LIMIT} 張，請選 <b>${need}</b> 張棄掉（已選 ${ui.sel.size} 張）。`;
+      st.innerHTML=`<b>回合結束：</b>手牌最多 ${handLimit(s)} 張，請選 <b>${need}</b> 張棄掉（已選 ${ui.sel.size} 張）。`;
       btn(`棄掉 ${ui.sel.size}/${need} 張`,()=>doAction(x=>actDiscard(x,me,[...ui.sel])),'danger',ui.sel.size!==need);
       if(ui.sel.size) btn('清除',()=>{ui.sel.clear();renderGame();},'ghost');
-    } else st.innerHTML=`等待 <b>${N(s.turn)}</b> 棄牌到 ${HAND_LIMIT} 張…`;
+    } else st.innerHTML=`等待 <b>${N(s.turn)}</b> 棄牌到 ${handLimit(s)} 張…`;
     return;
   }
   if(s.phase==='defend'){
@@ -1060,7 +1071,7 @@ function showEnd(force){
   <div class="row" style="justify-content:flex-end">${(offline||s.host===PID)?'<button class="ghost" onclick="closeModal();restart()">再來一局</button>':''}<button onclick="closeModal()">關閉</button></div>`);
 }
 async function restart(){
-  const seats=G.seats.map(p=>({...p})); const s=newGame(seats,{timeLimit:G.timeLimit||0});
+  const seats=G.seats.map(p=>({...p})); const s=newGame(seats,{timeLimit:G.timeLimit||0,handLimit:HL(G)});
   if(!offline){s.code=code;s.host=G.host;s.hostName=G.hostName;s.createdAt=G.createdAt;}
   seenBattle=null; endShownVer=null; await commit(s);
 }
