@@ -46,7 +46,8 @@ header.top .sub{color:#c8bda3;font-size:13px}
 svg#map{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;user-select:none;-webkit-user-select:none}
 .region{cursor:pointer}
 .region circle.body{stroke-width:3}
-.edge.hl{stroke:#ffd76a!important;opacity:1!important;stroke-width:3.2!important;stroke-dasharray:none!important}
+.edge.hl{stroke:#ffe9a3!important;opacity:1!important;stroke-width:3.6!important;stroke-dasharray:none!important;filter:drop-shadow(0 0 3px #ffb300)}
+svg.focus .edge:not(.hl){opacity:.18!important}
 svg.nolines .edge.land:not(.hl){display:none}
 .zoom button.off{opacity:.45}
 .region text{pointer-events:none}
@@ -690,7 +691,7 @@ function buildMap(){
   el('g',{id:'landLayer'},svg);
   const ge=el('g',{id:'edgeLayer'},svg);
   EDGES.forEach(([a,b,wrap])=>{const A=R[a],B=R[b], sea=isSea(a,b);
-    const at={class:sea?'edge sea':'edge land','data-a':a,'data-b':b,stroke:'#ffffff','stroke-width':sea?2.2:1.5,opacity:sea?.85:.45,'stroke-linecap':'round'};
+    const at={class:sea?'edge sea':'edge land','data-a':a,'data-b':b,stroke:'#f2c14e','stroke-width':sea?2.4:1.8,opacity:sea?.95:.7,'stroke-linecap':'round'};
     if(sea) at['stroke-dasharray']='1 6';
     if(wrap){ el('line',{...at,x1:A.x,y1:A.y,x2:0,y2:A.y-6},ge); el('line',{...at,x1:B.x,y1:B.y,x2:1000,y2:B.y+6},ge);}
     else el('line',{...at,x1:A.x,y1:A.y,x2:B.x,y2:B.y},ge);});
@@ -818,6 +819,7 @@ function renderGame(){
     g.style.opacity=(s.status==='ended'&&o!==undefined&&!hl.has(r.id))?.45:1;
   });
   const focus=ui.from||ui.peek;
+  svg.classList.toggle('focus',!!focus);
   svg.querySelectorAll('.edge').forEach(e=>e.classList.toggle('hl',!!focus&&(e.dataset.a===focus||e.dataset.b===focus)));
   // seats
   const wait=new Set(waitingOn(s)), sb_=$('seats'); sb_.innerHTML='';
